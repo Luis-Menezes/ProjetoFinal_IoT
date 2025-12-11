@@ -1,4 +1,5 @@
-/********************** ARDUINO 
+/********************** 
+ * ARDUINO 
 ***********************/
 #include "DHT.h"
 #include "Wire.h"
@@ -45,6 +46,31 @@ float get_distance(){
   return distanceCm;
 }
 
+/*=== CONFIGURACAO: COMUNICACAO I2C ===*/
+
+/* Recebe o comando do dispositivo principal */
+void receiveEvent(int n) {
+  if (Wire.available()){
+    cmd = Wire.read();
+    Serial.print("cmd recebido: ");
+    Serial.println(cmd);
+    // cmd = cmd - 48; 
+  }
+}
+
+/* Envia o dado pedido pelo comando recebido na funcao receiveEvent*/
+void enviarDados() {
+  float valor = 0.0;
+
+  switch (cmd) {
+    case 0: valor = ldr.value; break;   
+    case 1: valor = dht_humidity.value; break;
+    case 2: valor = ultrassound.value; break;
+    default: valor = -1.0; break;
+  }
+  Wire.write((byte*)&valor, sizeof(float));
+}
+
 void setup() {
   // Configuração LDR
   pinMode(ldr.pin[0], INPUT);
@@ -54,7 +80,13 @@ void setup() {
   pinMode(ultrassound.pin[1], INPUT);
 
   Serial.begin(9600);
-  Wire.begin();
+
+  /*setup da comunicacao I2C*/
+  Wire.begin(8);
+  Wire.onReceive(receiveEvent);
+  Wire.onRequest(enviarDados);
+
+  //setup do sensor DHT
   dht.begin();
 }
 
