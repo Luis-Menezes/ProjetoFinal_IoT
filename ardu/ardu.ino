@@ -3,7 +3,9 @@
 ***********************/
 #include "DHT.h"
 #include "Wire.h"
+#include "Servo.h"
 
+#define SERVO_PIN A0 //mudar
 #define LDR_PIN A3
 #define DHT_PIN 8 
 #define ULT_TRIG_PIN 10
@@ -11,19 +13,49 @@
 #define DHTTYPE DHT11
 #define SOUND_SPEED 0.034
 #define TIME_INTERVAL 500 /* ms */
+#define SERVO_TIME 1000 //timer do servo
+#define N_AMOSTRAS 10  // Número de leituras para a média móvel (Suavização)
 
-struct sensor{
-  int pin[2]; // Capacidade para até 2 pinos (índice 0 e 1)
-  int outputPin;
-  float value;
+Servo servinho;
+int servoState = 0;
+unsigned long servoTimer;
+
+// Estrutura atualizada para suportar Média Móvel
+struct sensor {
+  int pin[2];      // Pinos do sensor
+  float leituras[N_AMOSTRAS]; // Buffer histórico
+  int indice;      // Índice atual no buffer
+  float soma;      // Soma atual das leituras
+  float media;     // O valor final suavizado
 };
 
-// We use '0' if pin is not used
-struct sensor ldr = { {LDR_PIN, 0}, 0.0 }; 
-struct sensor dht_humidity = { {DHT_PIN, 0}, 0.0 }; 
-struct sensor ultrassound = { {ULT_TRIG_PIN, ULT_ECHO_PIN}, 0.0 };
+// Inicialização das structs (Buffers iniciam zerados automaticamente por serem globais)
+struct sensor ldr = { {LDR_PIN, 0}, {0}, 0, 0.0, 0.0 }; 
+struct sensor dht_humidity = { {DHT_PIN, 0}, {0}, 0, 0.0, 0.0 }; 
+struct sensor ultrassound = { {ULT_TRIG_PIN, ULT_ECHO_PIN}, {0}, 0, 0.0, 0.0 };
+int cmd = 0;
 
 DHT dht(DHT_PIN, DHTTYPE);
+
+void atualizarSensor(struct sensor &s, float novaLeitura) {
+  // Se a leitura for inválida (ex: NaN do DHT), ignoramos para não quebrar a média
+  if (isnan(novaLeitura)) return;
+
+  // Subtrai a leitura mais antiga da soma
+  s.soma = s.soma - s.leituras[s.indice];
+  
+  // Armazena a nova leitura no buffer
+  s.leituras[s.indice] = novaLeitura;
+  
+  // Adiciona a nova leitura à soma
+  s.soma = s.soma + novaLeitura;
+  
+  // Avança o índice (circular)
+  s.indice = (s.indice + 1) % N_AMOSTRAS;
+  
+  // Calcula a nova média
+  s.media = s.soma / N_AMOSTRAS;
+}
 
 float get_distance(){
   float distanceCm = -1;
@@ -46,6 +78,22 @@ float get_distance(){
   return distanceCm;
 }
 
+//=== CONTROLE DO SERVO ===//
+int ctrlServo(int oc){
+  if (oc == 0){   //servo abrindo
+    servinho.write(180);
+    servoTimer = millis();
+    servoState = 1;
+
+    return 1;
+  } else if (oc == 1){    //servo fechando
+    servinho.write(0);
+    servoState = 0;
+
+    return 0;
+  }
+}
+
 /*=== CONFIGURACAO: COMUNICACAO I2C ===*/
 
 /* Recebe o comando do dispositivo principal */
@@ -63,12 +111,14 @@ void enviarDados() {
   float valor = 0.0;
 
   switch (cmd) {
-    case 0: valor = ldr.value; break;   
-    case 1: valor = dht_humidity.value; break;
-    case 2: valor = ultrassound.value; break;
+    case 0: valor = ldr.media; break;   
+    case 1: valor = dht_humidity.media; break;
+    case 2: valor = ultrassound.media; break;
+    case 3: valor = ctrlServo(0); break;
     default: valor = -1.0; break;
   }
-  Wire.write((byte*)&valor, sizeof(float));
+  if(cmd<3) /* Envia só caso seja um dado */
+    Wire.write((byte*)&valor, sizeof(float));
 }
 
 void setup() {
@@ -88,24 +138,34 @@ void setup() {
 
   //setup do sensor DHT
   dht.begin();
+
+  //atribui pino ao servo
+  servinho.attach(SERVO_PIN);
 }
 
 void loop() {
   // Leitura LDR
-  ldr.value = analogRead(ldr.pin[0]);
-  
-  // Leitura DHT
-  dht_humidity.value = dht.readHumidity();
-  
-  // Leitura Ultrassom
-  ultrassound.value = get_distance();
+  float raw_ldr = analogRead(ldr.pin[0]);
+  float raw_dht = dht.readHumidity();
+  float raw_ult = get_distance();
 
-  Serial.print("Umid: ");
-  Serial.print(dht_humidity.value);
-  Serial.print(" | Luz: ");
-  Serial.print(ldr.value);
-  Serial.print(" | Dist: ");
-  Serial.println(ultrassound.value);
+  // 2. Atualiza as Médias Móveis
+  atualizarSensor(ldr, raw_ldr);
+  atualizarSensor(dht_humidity, raw_dht);
+  atualizarSensor(ultrassound, raw_ult);
+
+  // Debug: Mostrar as médias no Serial
+  Serial.print("Umid (Avg): ");
+  Serial.print(dht_humidity.media);
+  Serial.print(" | Luz (Avg): ");
+  Serial.print(ldr.media);
+  Serial.print(" | Dist (Avg): ");
+  Serial.println(ultrassound.media);
+  
+  //checa timer do servo
+  if (servoState && ((millis() - servoTimer) > SERVO_TIME)){
+    ctrlServo(1);
+  }
   
   delay(100); // Delay aumentado para facilitar leitura
 }
