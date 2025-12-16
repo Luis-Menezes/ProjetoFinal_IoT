@@ -21,6 +21,7 @@ PubSubClient mqttClient(wifiClient);
 /* PORTS */
 #define SLAVE_ADDR 8
 #define INTERVAL_TIME 500 /* ms */
+#define PUBLISH_INTERVAL 1000
 
 /*TCS3200*/
 #define S0_PIN 61632
@@ -30,11 +31,15 @@ PubSubClient mqttClient(wifiClient);
 #define OUT_PIN 61632
 
 int rgb[2];
+char buffer[20];
 
 /* VARIABLES */
 #define N_SENSORS 3
 float sensor_values[N_SENSORS] = {0.0, 0.0, 0.0}; // Sensor values stores arrays
+int   sensor_states[N_SENSORS] = {0, 0 , 0};
+float ultrassound_threshold[2] = {5.0, 20.0};
 unsigned long previousMillis = 0;
+unsigned long last_publish = 0;
 
 /* Variáveis de momento */
 bool is_tank_empty = 0; // 
@@ -112,10 +117,14 @@ void ConnectToMqtt(){
     Serial.print("ClientID: ");
     Serial.println(clientId);
 
-    // *** AQUI É A PARTE IMPORTANTE: TOKEN COMO USERNAME ***
-    if (mqttClient.connect(clientId, mqtt_user, mqtt_pass)){
+
+    if (mqttClient.connect(clientId, mqtt_user, "")){
       Serial.println("Connected to MQTT broker."); 
-      mqttClient.subscribe("test");   // tópico de teste
+
+      /*Topicos pra se inscrever*/
+      mqttClient.subscribe("ldr"); 
+      mqttClient.subscribe("humidity"); 
+      mqttClient.subscribe("ultrassound"); 
     } else {
       Serial.print("Falha na conexão, rc=");
       Serial.print(mqttClient.state());
@@ -133,6 +142,11 @@ void CallbackMqtt(char* topic, byte* payload, unsigned int length){
   for (int i = 0; i < length; i++) msg += (char)payload[i];
   char buf[20];
 
+  // === INSCRICAO NOS TOPICOS ===
+  if(t == "ldr"){
+    dtostrf(vetor[2], 6, 3, buf);  // distância local
+    mqttClient.publish(MENINOS.tpc_dist_resposta, buf);
+  }
   // ===== PEDIDOS AO NOSSO GRUPO (MAULA) =====
   if (t == MENINOS.tpc_dist_pedido) {
     if (msg == "pedir") {
@@ -168,6 +182,44 @@ void CallbackMqtt(char* topic, byte* payload, unsigned int length){
   }
 }
 
+/*=== FUNCOES AUXILIARES ===*/
+
+/*=== VERIFICA ESTADO DO ULTRASSOM ===*/
+int verificaEstadoUltrassom(){
+  if(sensor_values[2] <= ultrassound_threshold[0]){
+    return 0;
+  }
+  else if(sensor_values[2] > ultrassound_threshold[0] && sensor_values[2] <= ultrassound_threshold[1]){
+    return 1;
+  }
+  else if(sensor_values[2] > ultrassound_threshold[1]){
+    return 2;
+  }
+  else{
+    return -1
+  }
+}
+
+void enviaEstadoReservatorio(){
+  sensor_states[2] = verificaEstadoUltrassom()
+  String buf = String(sensor_states[2]);
+  mqttClient.publish("ultrassound", buf.c_str());
+}
+
+int verificaEstadoDHT(){
+  if(sensor_values[1] <= dht_threshold){
+    return 0
+  }
+  else{
+    return 1;
+  }
+}
+
+void enviaEstadoVasilha(){
+  sensor_states[1] = verificaEstadoDHT()
+  String buf = String(sensor_states[1]);
+  mqttClient.publish("dht", buf.c_str());
+}
 
 void setup() {
   // put your setup code here, to run once:
@@ -191,9 +243,17 @@ void setup() {
   digitalWrite(S1_PIN, HIGH);
 }
 
-int x = 0;
+void enviaValorLDR(){
+  dtostrf(sensor_values[0], 6, 3, buffer);
+  mqttClient.publish("ldr", buffer);
+}
+
 void loop() {
   /* Will read from Arduino in an interval */
+  if (!mqttClient.connected()) ConnectToMqtt(){
+    mqttClient.loop();
+  }
+
   if(millis() - previousMillis >= INTERVAL_TIME){
     previousMillis = millis();
     recebeDados();
@@ -204,15 +264,19 @@ void loop() {
     Serial.println("ALERT: Food tank is empty!");
   }
 
+  /*Publica estado dos sensores a cada PUBLISH_INTERVAl segundos*/
+  if(millis() - last_publish >= PUBLISH_INTERVAL){
+    enviaValorLDR();
+    enviaEstadoReservatorio();
+    enviaEstadoVasilha();
+
+    last_publish = millis();
+  }
+
+
   has_water_in_bowl = (sensor_values[0] < 500.0); /* Example threshold */
 
-  if (!mqttClient.connected()) ConnectToMqtt();
-  mqttClient.loop();
 
-  if(x == 0){
-      
-    mqttClient.publish("test", "oiii");
-    x++;
-  }
+
 
 }
