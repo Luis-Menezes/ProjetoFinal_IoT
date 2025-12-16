@@ -22,3 +22,6 @@ O projeto consiste no código para um alimentador de gatos utilizando esp32 e ar
 ## LEDs
 - Primeiro: verifica se todos os componentes estão OK para liberar a comida. Você aperta um botão que atualiza essa verificação e, se tiver tudo ok, ele apaga o LED.
 
+## Formas de abrir
+- Fazer o sensor de toque que manda o numero 3 pro Arduino. 
+- Fazer um botão no dashboard pra manrar 3 pro Arduino e abrir também.

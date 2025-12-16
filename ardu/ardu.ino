@@ -5,7 +5,7 @@
 #include "Wire.h"
 #include "Servo.h"
 
-#define SERVO_PIN A0 //mudar
+#define SERVO_PIN 12 //mudar
 #define LDR_PIN A3
 #define DHT_PIN 8 
 #define ULT_TRIG_PIN 10
@@ -13,12 +13,27 @@
 #define DHTTYPE DHT11
 #define SOUND_SPEED 0.034
 #define TIME_INTERVAL 500 /* ms */
-#define SERVO_TIME 1000 //timer do servo
+#define SERVO_TIME 3000 //timer do servo
 #define N_AMOSTRAS 10  // Número de leituras para a média móvel (Suavização)
+
+/*PINOS DO SENSOR DE COR*/
+#define S0_PIN 4  //escala de freq
+#define S1_PIN 5  //escala de freq
+#define S2_PIN 6  //filtro de cor
+#define S3_PIN 7  //filtro de cor
+#define OUT_PIN 3
+
+#define FOOD_TIME 10000
 
 Servo servinho;
 int servoState = 0;
-unsigned long servoTimer;
+int servoEN = 0;
+int servoForce = 0;
+unsigned long servoTimer, food_timer;
+
+int first;
+
+int red, blue, green;
 
 // Estrutura atualizada para suportar Média Móvel
 struct sensor {
@@ -36,6 +51,22 @@ struct sensor ultrassound = { {ULT_TRIG_PIN, ULT_ECHO_PIN}, {0}, 0, 0.0, 0.0 };
 int cmd = 0;
 
 DHT dht(DHT_PIN, DHTTYPE);
+
+/*FUNÇAO DE LEITURA DE COR*/
+void getColors(){
+  digitalWrite(S2_PIN, LOW);
+  digitalWrite(S3_PIN, LOW);
+  red = pulseIn(OUT_PIN, digitalRead(OUT_PIN) == HIGH ? LOW : HIGH);
+  delay(20);
+
+  digitalWrite(S3_PIN, HIGH);
+  blue = pulseIn(OUT_PIN, digitalRead(OUT_PIN) == HIGH ? LOW : HIGH);
+  delay(20);
+
+  digitalWrite(S2_PIN, HIGH);
+  green = pulseIn(OUT_PIN, digitalRead(OUT_PIN) == HIGH ? LOW : HIGH);
+  delay(20);
+}
 
 void atualizarSensor(struct sensor &s, float novaLeitura) {
   // Se a leitura for inválida (ex: NaN do DHT), ignoramos para não quebrar a média
@@ -80,8 +111,8 @@ float get_distance(){
 
 //=== CONTROLE DO SERVO ===//
 int ctrlServo(int oc){
-  if (oc == 0){   //servo abrindo
-    servinho.write(180);
+  if (((oc == 0) && (servoEN)) || (oc == 2)){   //servo abrindo
+    servinho.write(1);
     servoTimer = millis();
     servoState = 1;
 
@@ -89,8 +120,11 @@ int ctrlServo(int oc){
   } else if (oc == 1){    //servo fechando
     servinho.write(0);
     servoState = 0;
+    servoForce = 0;
 
     return 0;
+  } else {
+    return -1;
   }
 }
 
@@ -114,7 +148,7 @@ void enviarDados() {
     case 0: valor = ldr.media; break;   
     case 1: valor = dht_humidity.media; break;
     case 2: valor = ultrassound.media; break;
-    case 3: valor = ctrlServo(0); break;
+    case 3: valor = 3; servoForce = 1; break;
     default: valor = -1.0; break;
   }
   if(cmd<3) /* Envia só caso seja um dado */
@@ -141,6 +175,19 @@ void setup() {
 
   //atribui pino ao servo
   servinho.attach(SERVO_PIN);
+
+  //pinos do sensor de cor
+  pinMode(S0_PIN, OUTPUT);
+  pinMode(S1_PIN, OUTPUT);
+  pinMode(S2_PIN, OUTPUT);
+  pinMode(S3_PIN, OUTPUT);
+  pinMode(OUT_PIN, INPUT);
+
+  //escala de freq 100% do sensor de cor
+  digitalWrite(S0_PIN, HIGH);
+  digitalWrite(S1_PIN, HIGH);
+
+  first = 1;
 }
 
 void loop() {
@@ -162,10 +209,43 @@ void loop() {
   Serial.print(" | Dist (Avg): ");
   Serial.println(ultrassound.media);
   
+  getColors();
+
+  if (!(((red > 30) && (red < 40)) && ((green > 30) && (green < 40)) && ((blue > 35) && (blue < 45)))) {
+    servoEN = 1;
+    Serial.println("=====NAO HA COMIDA=====");
+  }
+
+  // Serial.println("CORES");
+  // Serial.print("RED: ");
+  // Serial.print(red);
+  // Serial.print("BLUE: ");
+  // Serial.print(blue);
+  // Serial.print("GREEN: ");
+  // Serial.print(green);
+
   //checa timer do servo
   if (servoState && ((millis() - servoTimer) > SERVO_TIME)){
     ctrlServo(1);
+    servoEN = 0;
   }
+
+  if (((millis() - food_timer) >= FOOD_TIME) && servoEN){
+    ctrlServo(0);
+    servoEN = 0;
+    food_timer = millis();
+  }
+
+  if (servoForce) {
+    ctrlServo(2);
+  }
+
+  if (first){
+    first = 0;
+    food_timer = millis();
+  }
+
+  //red 30 green 30 blue 40
   
   delay(100); // Delay aumentado para facilitar leitura
 }

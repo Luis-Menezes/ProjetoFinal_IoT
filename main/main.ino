@@ -20,8 +20,8 @@ PubSubClient mqttClient(wifiClient);
 
 /* PORTS */
 #define SLAVE_ADDR 8
-#define INTERVAL_TIME 500 /* ms */
-#define PUBLISH_INTERVAL 1000
+#define INTERVAL_TIME 1000 /* ms */
+#define PUBLISH_INTERVAL 2000
 
 /*TCS3200*/
 #define S0_PIN 61632
@@ -32,12 +32,15 @@ PubSubClient mqttClient(wifiClient);
 
 int rgb[2];
 char buffer[20];
+int LED_PIN[2] = {2,4};
+int LED_STATE[2] = {0,0};
+float dht_threshold = 50.0;
 
 /* VARIABLES */
 #define N_SENSORS 3
 float sensor_values[N_SENSORS] = {0.0, 0.0, 0.0}; // Sensor values stores arrays
 int   sensor_states[N_SENSORS] = {0, 0 , 0};
-float ultrassound_threshold[2] = {5.0, 20.0};
+float ultrassound_threshold[2] = {7.0, 20.0};
 unsigned long previousMillis = 0;
 unsigned long last_publish = 0;
 
@@ -125,6 +128,7 @@ void ConnectToMqtt(){
       mqttClient.subscribe("ldr"); 
       mqttClient.subscribe("humidity"); 
       mqttClient.subscribe("ultrassound"); 
+      mqttClient.subscribe("led1");
     } else {
       Serial.print("Falha na conexão, rc=");
       Serial.print(mqttClient.state());
@@ -135,52 +139,53 @@ void ConnectToMqtt(){
 }
 
 void CallbackMqtt(char* topic, byte* payload, unsigned int length){
-  Serial.println("ReceivedMessage!"); 
+  //Serial.println("ReceivedMessage!"); 
   String t = String(topic);
   String msg = "";
 
   for (int i = 0; i < length; i++) msg += (char)payload[i];
   char buf[20];
 
-  // === INSCRICAO NOS TOPICOS ===
-  if(t == "ldr"){
-    dtostrf(vetor[2], 6, 3, buf);  // distância local
-    mqttClient.publish(MENINOS.tpc_dist_resposta, buf);
+
+  /*=== INSCRICAO NOS TOPICOS === */
+  if(t == "led1"){
+    Serial.println("Abrir servo");
+    enviarI2C(3);
   }
-  // ===== PEDIDOS AO NOSSO GRUPO (MAULA) =====
-  if (t == MENINOS.tpc_dist_pedido) {
-    if (msg == "pedir") {
-      dtostrf(vetor[2], 6, 3, buf);  // distância local
-      mqttClient.publish(MENINOS.tpc_dist_resposta, buf);
-    }
+//   // ===== PEDIDOS AO NOSSO GRUPO (MAULA) =====
+//   if (t == MENINOS.tpc_dist_pedido) {
+//     if (msg == "pedir") {
+//       dtostrf(vetor[2], 6, 3, buf);  // distância local
+//       mqttClient.publish(MENINOS.tpc_dist_resposta, buf);
+//     }
 
-  } else if (t == MENINOS.tpc_temp_pedido) {
-    if (msg == "pedir") {
-      dtostrf(vetor[1], 6, 3, buf);  // temperatura local
-      mqttClient.publish(MENINOS.tpc_temp_resposta, buf);
-    }
+//   } else if (t == MENINOS.tpc_temp_pedido) {
+//     if (msg == "pedir") {
+//       dtostrf(vetor[1], 6, 3, buf);  // temperatura local
+//       mqttClient.publish(MENINOS.tpc_temp_resposta, buf);
+//     }
 
-  } else if (t == MENINOS.tpc_led_pedido) {
-    if (msg == "toggle") {
-      Pisca();
-      mqttClient.publish(MENINOS.tpc_led_resposta, luz ? "1" : "0");
-    }
+//   } else if (t == MENINOS.tpc_led_pedido) {
+//     if (msg == "toggle") {
+//       Pisca();
+//       mqttClient.publish(MENINOS.tpc_led_resposta, luz ? "1" : "0");
+//     }
 
-  // ===== RESPOSTAS DO GRUPO REMOTO (MENINOS) =====
-  } else if (t == MAULA.tpc_dist_resposta) {
-    Serial.print("DISTÂNCIA Grupo 2: ");
-    Serial.print(msg);
-    Serial.println(" cm");
+//   // ===== RESPOSTAS DO GRUPO REMOTO (MENINOS) =====
+//   } else if (t == MAULA.tpc_dist_resposta) {
+//     Serial.print("DISTÂNCIA Grupo 2: ");
+//     Serial.print(msg);
+//     Serial.println(" cm");
 
-  } else if (t == MAULA.tpc_temp_resposta) {
-    Serial.print("TEMPERATURA Grupo 2: ");
-    Serial.print(msg);
-    Serial.println(" °C");
+//   } else if (t == MAULA.tpc_temp_resposta) {
+//     Serial.print("TEMPERATURA Grupo 2: ");
+//     Serial.print(msg);
+//     Serial.println(" °C");
 
-  } else if (t == MAULA.tpc_led_resposta) {
-    Serial.println("LED do Grupo 2 FOI ALTERADO!");
-  }
-}
+//   } else if (t == MAULA.tpc_led_resposta) {
+//     Serial.println("LED do Grupo 2 FOI ALTERADO!");
+//   }
+ }
 
 /*=== FUNCOES AUXILIARES ===*/
 
@@ -196,19 +201,19 @@ int verificaEstadoUltrassom(){
     return 2;
   }
   else{
-    return -1
+    return -1;
   }
 }
 
 void enviaEstadoReservatorio(){
-  sensor_states[2] = verificaEstadoUltrassom()
+  sensor_states[2] = verificaEstadoUltrassom();
   String buf = String(sensor_states[2]);
   mqttClient.publish("ultrassound", buf.c_str());
 }
 
 int verificaEstadoDHT(){
   if(sensor_values[1] <= dht_threshold){
-    return 0
+    return 0;
   }
   else{
     return 1;
@@ -216,10 +221,25 @@ int verificaEstadoDHT(){
 }
 
 void enviaEstadoVasilha(){
-  sensor_states[1] = verificaEstadoDHT()
+  sensor_states[1] = verificaEstadoDHT();
   String buf = String(sensor_states[1]);
   mqttClient.publish("dht", buf.c_str());
 }
+
+int verificaLuminosidade(){
+  if(sensor_values[0] <= 70)
+    return 0;
+  else
+    return 1;
+}
+
+void enviaEstadoLED1(){
+  LED_STATE[1] = verificaLuminosidade();
+  String buf = String(LED_STATE[1]);
+  mqttClient.publish("led1", buf.c_str());
+}
+
+
 
 void setup() {
   // put your setup code here, to run once:
@@ -238,6 +258,9 @@ void setup() {
   pinMode(S3_PIN, OUTPUT);
 
   pinMode(OUT_PIN, INPUT);
+  pinMode(LED_PIN[0], OUTPUT);
+  pinMode(LED_PIN[1], OUTPUT);
+
 
   digitalWrite(S0_PIN, HIGH);
   digitalWrite(S1_PIN, HIGH);
@@ -250,18 +273,14 @@ void enviaValorLDR(){
 
 void loop() {
   /* Will read from Arduino in an interval */
-  if (!mqttClient.connected()) ConnectToMqtt(){
-    mqttClient.loop();
-  }
+ if (!mqttClient.connected()) {
+  ConnectToMqtt();
+}
+mqttClient.loop();   
 
   if(millis() - previousMillis >= INTERVAL_TIME){
     previousMillis = millis();
     recebeDados();
-  }
-  /* Checks food tank level */
-  is_tank_empty = (sensor_values[2] > 15.0); /* See if values are correct */
-  if(is_tank_empty){ /* Envia alerta MQTT */
-    Serial.println("ALERT: Food tank is empty!");
   }
 
   /*Publica estado dos sensores a cada PUBLISH_INTERVAl segundos*/
@@ -269,10 +288,10 @@ void loop() {
     enviaValorLDR();
     enviaEstadoReservatorio();
     enviaEstadoVasilha();
-
+    enviaEstadoLED1();
+    digitalWrite(LED_PIN[1], LED_STATE[1]);
     last_publish = millis();
   }
-
 
   has_water_in_bowl = (sensor_values[0] < 500.0); /* Example threshold */
 
