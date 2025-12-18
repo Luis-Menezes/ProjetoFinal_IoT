@@ -23,6 +23,10 @@
 #define S3_PIN 7  //filtro de cor
 #define OUT_PIN 3
 
+#define RED 30
+#define GREEN 30
+#define BLUE 40
+
 #define FOOD_TIME 10000
 
 Servo servinho;
@@ -51,6 +55,10 @@ struct sensor ultrassound = { {ULT_TRIG_PIN, ULT_ECHO_PIN}, {0}, 0, 0.0, 0.0 };
 int cmd = 0;
 
 DHT dht(DHT_PIN, DHTTYPE);
+
+
+
+
 
 /*FUNÇAO DE LEITURA DE COR*/
 void getColors(){
@@ -112,7 +120,7 @@ float get_distance(){
 //=== CONTROLE DO SERVO ===//
 int ctrlServo(int oc){
   if (((oc == 0) && (servoEN)) || (oc == 2)){   //servo abrindo
-    servinho.write(1);
+    servinho.write(90);
     servoTimer = millis();
     servoState = 1;
 
@@ -154,6 +162,18 @@ void enviarDados() {
   if(cmd<3) /* Envia só caso seja um dado */
     Wire.write((byte*)&valor, sizeof(float));
 }
+
+
+bool temComida(){
+  getColors();
+
+  bool rval = ((red >= RED - 5) && (red <= RED + 5));
+  bool gval = ((green >= GREEN - 5) && (green <= GREEN + 5));
+  bool bval = ((blue >= BLUE - 5) && (blue <= BLUE + 5));
+
+  return (rval && gval && bval);
+}
+
 
 void setup() {
   // Configuração LDR
@@ -211,10 +231,13 @@ void loop() {
   
   getColors();
 
-  if (!(((red > 30) && (red < 40)) && ((green > 30) && (green < 40)) && ((blue > 35) && (blue < 45)))) {
-    servoEN = 1;
-    Serial.println("=====NAO HA COMIDA=====");
-  }
+if (!temComida()){
+  servoEN = 1;
+  Serial.println("===== NAO TEM COMIDA =====");
+} else {
+  servoEN = 0;
+}
+
 
   // Serial.println("CORES");
   // Serial.print("RED: ");
@@ -227,7 +250,6 @@ void loop() {
   //checa timer do servo
   if (servoState && ((millis() - servoTimer) > SERVO_TIME)){
     ctrlServo(1);
-    servoEN = 0;
   }
 
   if (((millis() - food_timer) >= FOOD_TIME) && servoEN){
@@ -238,6 +260,7 @@ void loop() {
 
   if (servoForce) {
     ctrlServo(2);
+    servoForce = 0;
   }
 
   if (first){
